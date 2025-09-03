@@ -47,12 +47,15 @@ brew install local/vdh/vdh
 ### 基本使用
 
 ```bash
-# 🎯 启动服务器
-vdh server
+# 🚀 启动服务器（后台运行）
+vdh start
 
 # 📥 发送下载请求 (返回12位任务ID)
 vdh -i "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 # 输出: OK: Task added with ID abc123def456
+
+# 📊 查看服务器和队列状态
+vdh status
 
 # 🔍 查询特定任务状态
 vdh task abc123def456
@@ -60,9 +63,11 @@ vdh task abc123def456
 # 📋 查看最近任务列表
 vdh list
 
-# 📊 查看队列状态和统计
-vdh status
+# � 查看详细统计
 vdh stats
+
+# 🛑 停止服务器
+vdh stop
 
 # 🧹 清理旧任务记录
 vdh cleanup
@@ -88,17 +93,19 @@ brew services list | grep vdh
 
 | 命令 | 描述 | 示例 |
 |------|------|------|
-| `server` | 启动 Socket 服务器 | `vdh server` |
-| `input <URL>`, `-i <URL>` | 发送下载请求 (返回任务ID) | `vdh -i "https://youtube.com/..."` |
-| `task <ID>` | 查询特定任务详情 | `vdh task abc123def456` |
-| `list`, `ls` | 查看最近任务列表 | `vdh list` |
-| `status` | 查看队列状态 | `vdh status` |
-| `stats` | 查看任务统计信息 | `vdh stats` |
-| `cleanup` | 清理30天前的旧任务 | `vdh cleanup` |
-| `download <URL>`, `-d <URL>` | 直接下载（不通过队列） | `vdh -d "https://..."` |
-| `test` | 测试 Socket 连接 | `vdh test` |
-| `--help` | 显示帮助信息 | `vdh --help` |
-| `--version` | 显示版本信息 | `vdh --version` |
+| `start` | 在后台启动VDH服务器 | `vdh start` |
+| `stop` | 停止运行中的VDH服务器 | `vdh stop` |
+| `status` | 检查服务器和队列状态 | `vdh status` |
+| `server` | 启动Unix socket服务器(前台) | `vdh server` |
+| `input`, `-i` | 发送下载请求到服务器 | `vdh -i "URL"` |
+| `task` | 查询指定任务详情 | `vdh task abc123def456` |
+| `list`, `ls` | 列出最近的任务 | `vdh list` |
+| `stats` | 显示任务统计信息 | `vdh stats` |
+| `cleanup` | 清理旧的已完成任务 | `vdh cleanup` |
+| `download`, `-d` | 直接下载(跳过队列) | `vdh -d "URL"` |
+| `test` | 测试socket通信 | `vdh test` |
+| `help`, `--help`, `-h` | 显示帮助信息 | `vdh --help` |
+| `version`, `--version`, `-v` | 显示版本信息 | `vdh --version` |
 
 ## 🗃️ 数据库和任务管理
 
@@ -130,7 +137,7 @@ brew services list | grep vdh
 
 ### 数据库位置
 
-- **路径**: `~/Documents/VideoDownloader/tasks.db`
+- **路径**: `~/.vdh/video_downloader.db`
 - **类型**: SQLite3 数据库
 - **表结构**: 
   ```sql
@@ -288,7 +295,7 @@ make help
 ### 日常下载管理
 ```bash
 # 启动服务（一次性设置）
-brew services start vdh
+vdh start
 
 # 添加下载任务
 vdh -i "https://youtube.com/watch?v=abc123"
@@ -297,8 +304,14 @@ vdh -i "https://youtube.com/watch?v=abc123"
 # 查询任务状态
 vdh task def456ghi789
 
+# 查看服务器状态
+vdh status
+
 # 查看所有任务
 vdh list
+
+# 停止服务
+vdh stop
 
 # 定期清理
 vdh cleanup
@@ -366,8 +379,10 @@ vdh/
 ├── status.sh               # 状态管理脚本
 ├── test_queue.sh           # 队列测试脚本
 ├── test_socket.sh          # Socket通信测试
-├── video_downloader.db     # SQLite3 数据库文件
 └── README.md               # 本文档
+
+~/.vdh/
+└── video_downloader.db     # SQLite3 数据库文件
 ```
 
 ### 核心组件
@@ -420,13 +435,13 @@ vdh/
 5. **数据库问题**
    ```bash
    # 检查数据库文件
-   ls -la ~/video_downloader.db
+   ls -la ~/.vdh/video_downloader.db
    
    # 修复数据库
-   sqlite3 ~/video_downloader.db "PRAGMA integrity_check;"
+   sqlite3 ~/.vdh/video_downloader.db "PRAGMA integrity_check;"
    
    # 重置数据库（注意：会丢失所有数据）
-   rm ~/video_downloader.db
+   rm ~/.vdh/video_downloader.db
    vdh server &  # 重新创建数据库
    ```
 
@@ -452,7 +467,7 @@ vdh/
 echo "STATUS" | nc -U /tmp/video_downloader.sock
 
 # 数据库调试
-sqlite3 ~/video_downloader.db "
+sqlite3 ~/.vdh/video_downloader.db "
 SELECT id, url, status, created_at 
 FROM tasks 
 ORDER BY created_at DESC 
@@ -462,13 +477,13 @@ LIMIT 5;
 # 清理所有资源
 make clean
 rm -f /tmp/video_downloader.sock
-rm -f ~/video_downloader.db
+rm -f ~/.vdh/video_downloader.db
 
 # 性能监控
 while true; do
     echo "=== $(date) ==="
     vdh stats
-    echo "数据库大小: $(du -h ~/video_downloader.db 2>/dev/null || echo '未找到')"
+    echo "数据库大小: $(du -h ~/.vdh/video_downloader.db 2>/dev/null || echo '未找到')"
     sleep 60
 done
 ```
@@ -516,16 +531,19 @@ CREATE INDEX idx_created_at ON tasks(created_at);
 ```
 
 ### 数据库位置
-- **开发环境**: `~/video_downloader.db`
-- **生产环境**: `~/Library/Application Support/VideoDownloaderHelper/video_downloader.db`
+- **默认位置**: `~/.vdh/video_downloader.db`
+- **配置文件夹**: `~/.vdh/` (自动创建)
 
 ### 数据备份
 ```bash
 # 备份数据库
-cp ~/video_downloader.db ~/video_downloader_backup_$(date +%Y%m%d).db
+cp ~/.vdh/video_downloader.db ~/.vdh/video_downloader_backup_$(date +%Y%m%d).db
 
 # 查看数据库内容
-sqlite3 ~/video_downloader.db "SELECT * FROM tasks ORDER BY created_at DESC LIMIT 10;"
+sqlite3 ~/.vdh/video_downloader.db "SELECT * FROM tasks ORDER BY created_at DESC LIMIT 10;"
+
+# 检查.vdh文件夹
+ls -la ~/.vdh/
 ```
 
 ## 📄 许可证

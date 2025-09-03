@@ -32,10 +32,10 @@ class DatabaseManager {
     private let dbQueue = DispatchQueue(label: "database.queue", qos: .utility)
     
     init() {
-        // 数据库文件路径
-        let documentsPath = NSHomeDirectory() + "/Documents/VideoDownloader"
-        try? FileManager.default.createDirectory(atPath: documentsPath, withIntermediateDirectories: true)
-        self.dbPath = documentsPath + "/tasks.db"
+        // 数据库文件路径 - 存储在用户根目录的.vdh文件夹下
+        let vdhPath = NSHomeDirectory() + "/.vdh"
+        try? FileManager.default.createDirectory(atPath: vdhPath, withIntermediateDirectories: true)
+        self.dbPath = vdhPath + "/video_downloader.db"
         
         openDatabase()
         createTables()
@@ -386,6 +386,7 @@ class DatabaseManager {
 class VideoDownloaderHelper {
     private let socketPath = "/tmp/video_downloader.sock"
     private var serverSocket: Int32 = -1
+    private var isServerRunning = true
     
     // 数据库管理器
     let dbManager = DatabaseManager()
@@ -490,17 +491,43 @@ class VideoDownloaderHelper {
         print("Socket server listening on \(socketPath)")
         
         // 接受连接循环
-        while true {
+        while isServerRunning {
             let clientSocket = accept(serverSocket, nil, nil)
             guard clientSocket != -1 else {
-                print("Failed to accept connection: \(String(cString: strerror(errno)))")
+                if isServerRunning {  // 只在仍在运行时打印错误
+                    print("Failed to accept connection: \(String(cString: strerror(errno)))")
+                }
                 continue
+            }
+            
+            if !isServerRunning {
+                close(clientSocket)
+                break
             }
             
             print("Client connected")
             handleClient(clientSocket: clientSocket)
             close(clientSocket)
         }
+        
+        // 清理资源
+        close(serverSocket)
+        unlink(socketPath)
+        print("✅ Server stopped and resources cleaned up")
+    }
+    
+    func stopServer() {
+        print("Stopping server...")
+        isServerRunning = false
+        
+        // 关闭服务器socket以中断accept循环
+        if serverSocket != -1 {
+            close(serverSocket)
+            unlink(socketPath)
+        }
+        
+        // 退出程序
+        exit(0)
     }
     
     private func handleClient(clientSocket: Int32) {
@@ -572,6 +599,19 @@ class VideoDownloaderHelper {
                     response += "\(statusEmoji) ID:\(task.id) [\(task.status.rawValue.uppercased())] \(task.url)\n"
                 }
                 print("📋 Task list requested")
+            } else if command == "SHUTDOWN" {
+                // 处理关闭服务器请求
+                response = "OK: Server shutting down\n"
+                print("🛑 Shutdown command received, stopping server...")
+                
+                // 发送响应
+                _ = send(clientSocket, response, response.count, 0)
+                
+                // 优雅关闭服务器
+                DispatchQueue.main.async {
+                    self.stopServer()
+                }
+                return
             } else {
                 // 处理下载请求
                 if let taskId = addToDownloadQueue(url: command) {
@@ -914,6 +954,152 @@ func sendToSocketGeneric(message: String) -> Bool {
     return true
 }
 
+// 服务器管理函数
+func isServerRunning() -> Bool {
+    // 尝试连接到socket来检查服务器是否运行
+    let socketPath = "/tmp/video_downloader.sock"
+    let clientSocket = socket(AF_UNIX, SOCK_STREAM, 0)
+    
+    guard clientSocket != -1 else {
+        return false
+    }
+    
+    defer {
+        close(clientSocket)
+    }
+    
+    var serverAddr = sockaddr_un()
+    serverAddr.sun_family = sa_family_t(AF_UNIX)
+    
+    let pathBytes = socketPath.utf8CString
+    guard pathBytes.count <= MemoryLayout.size(ofValue: serverAddr.sun_path) else {
+        return false
+    }
+    
+    withUnsafeMutableBytes(of: &serverAddr.sun_path) { ptr in
+        pathBytes.withUnsafeBufferPointer { pathPtr in
+            ptr.copyMemory(from: UnsafeRawBufferPointer(pathPtr))
+        }
+    }
+    
+    let result = withUnsafePointer(to: serverAddr) { addrPtr in
+        addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockAddrPtr in
+            connect(clientSocket, sockAddrPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
+        }
+    }
+    
+    return result == 0
+}
+
+func startServerInBackground() {
+    let executablePath = CommandLine.arguments[0]
+    
+    let task = Process()
+    task.executableURL = URL(fileURLWithPath: executablePath)
+    task.arguments = ["server"]
+    
+    // 重定向输出到 /dev/null 以在后台运行
+    task.standardOutput = FileHandle.nullDevice
+    task.standardError = FileHandle.nullDevice
+    task.standardInput = FileHandle.nullDevice
+    
+    do {
+        try task.run()
+        // 等待一小段时间确保服务器启动
+        usleep(500000) // 0.5秒
+        
+        if isServerRunning() {
+            print("✅ VDH server started successfully in background")
+            print("📡 Socket: /tmp/video_downloader.sock")
+            print("🗃️ Database: ~/.vdh/video_downloader.db")
+        } else {
+            print("❌ Failed to start VDH server")
+            exit(1)
+        }
+    } catch {
+        print("❌ Failed to start server: \(error)")
+        exit(1)
+    }
+}
+
+func stopServer() {
+    // 发送停止信号到服务器
+    if sendToSocket(url: "SHUTDOWN") {
+        // 等待服务器关闭
+        usleep(500000) // 0.5秒
+        
+        if !isServerRunning() {
+            print("✅ VDH server stopped successfully")
+        } else {
+            print("⚠️ Server may still be running, trying force stop...")
+            // 尝试通过进程名终止
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+            task.arguments = ["-f", "vdh server"]
+            
+            do {
+                try task.run()
+                task.waitUntilExit()
+                
+                usleep(300000) // 0.3秒
+                if !isServerRunning() {
+                    print("✅ VDH server force stopped")
+                } else {
+                    print("❌ Failed to stop VDH server")
+                }
+            } catch {
+                print("❌ Failed to force stop server: \(error)")
+            }
+        }
+    } else {
+        print("❌ Could not communicate with server to stop it")
+        // 直接尝试终止进程
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        task.arguments = ["-f", "vdh server"]
+        
+        do {
+            try task.run()
+            task.waitUntilExit()
+            print("✅ VDH server process terminated")
+        } catch {
+            print("❌ Failed to terminate server process: \(error)")
+        }
+    }
+}
+
+func checkServerStatus() {
+    if isServerRunning() {
+        print("✅ VDH server is running")
+        print("📡 Socket: /tmp/video_downloader.sock")
+        print("🗃️ Database: ~/.vdh/video_downloader.db")
+        
+        // 获取队列状态
+        print("\n📊 Queue Status:")
+        if sendStatusRequest() {
+            // Status已经在sendStatusRequest中打印了
+        } else {
+            print("❌ Could not retrieve queue status")
+        }
+        
+        // 获取统计信息
+        print("\n📈 Statistics:")
+        let helper = VideoDownloaderHelper()
+        let stats = helper.dbManager.getTaskStats()
+        for status in TaskStatus.allCases {
+            let count = stats[status] ?? 0
+            let emoji = helper.getStatusEmoji(status)
+            print("  \(emoji) \(status.rawValue.capitalized): \(count)")
+        }
+        let total = stats.values.reduce(0, +)
+        print("  📋 Total: \(total)")
+        
+    } else {
+        print("❌ VDH server is not running")
+        print("💡 Start with: vdh start")
+    }
+}
+
 
 // 命令行参数处理
 func main() {
@@ -928,6 +1114,22 @@ func main() {
         let command = CommandLine.arguments[1]
         
         switch command {
+        case "start":
+            print("🚀 Starting VDH server in background...")
+            if isServerRunning() {
+                print("⚠️ Server is already running")
+                exit(0)
+            }
+            startServerInBackground()
+            
+        case "stop":
+            print("🛑 Stopping VDH server...")
+            if !isServerRunning() {
+                print("⚠️ Server is not running")
+                exit(0)
+            }
+            stopServer()
+            
         case "server":
             print("Starting Helper Tool Socket Server...")
             helper.startServer()
@@ -959,12 +1161,8 @@ func main() {
             }
             
         case "status":
-            print("Checking download queue status...")
-            if sendStatusRequest() {
-                print("Status request completed")
-            } else {
-                print("Failed to get status - make sure server is running")
-            }
+            print("📊 Checking VDH server status...")
+            checkServerStatus()
             
         case "task":
             if CommandLine.arguments.count > 2 {
@@ -1041,10 +1239,12 @@ func printHelp() {
     print("  vdh [COMMAND] [OPTIONS]")
     print("")
     print("COMMANDS:")
-    print("  server                     Start Unix socket server")
+    print("  start                      Start VDH server in background")
+    print("  stop                       Stop running VDH server")
+    print("  status                     Check VDH server and queue status")
+    print("  server                     Start Unix socket server (foreground)")
     print("  download <URL>, -d <URL>   Download single video directly")
     print("  input <URL>, -i <URL>      Send download request to running server")
-    print("  status                     Check download queue status")
     print("  task <ID>                  Get details for specific task ID")
     print("  list, ls                   List recent tasks")
     print("  stats                      Show task statistics")
@@ -1067,22 +1267,27 @@ func printHelp() {
     print("  • Real-time status monitoring")
     print("")
     print("EXAMPLES:")
-    print("  # Start the server")
-    print("  vdh server")
+    print("  # Start the server in background")
+    print("  vdh start")
+    print("")
+    print("  # Check server status")
+    print("  vdh status")
     print("")
     print("  # Send download requests (returns task ID)")
     print("  vdh input 'https://youtube.com/watch?v=abc123'")
     print("  vdh -i 'https://youtube.com/watch?v=def456'")
     print("")
     print("  # Check specific task status")
-    print("  vdh task 123")
+    print("  vdh task abc123def456")
     print("")
     print("  # List recent tasks")
     print("  vdh list")
     print("")
-    print("  # Check queue status and statistics")
-    print("  vdh status")
+    print("  # Check statistics")
     print("  vdh stats")
+    print("")
+    print("  # Stop the server")
+    print("  vdh stop")
     print("")
     print("  # Direct download (skip queue)")
     print("  vdh -d 'https://youtube.com/watch?v=ghi789'")
@@ -1101,7 +1306,7 @@ func printHelp() {
     print("  brew services list | grep vdh")
     print("")
     print("DATABASE LOCATION:")
-    print("  ~/Documents/VideoDownloader/tasks.db")
+    print("  ~/.vdh/video_downloader.db")
     print("")
     print("For more information, visit: https://github.com/yourusername/vdh")
 }
