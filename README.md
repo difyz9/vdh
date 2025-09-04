@@ -10,6 +10,8 @@
 - 🔍 **任务查询系统**：通过ID快速查询任务详情和状态
 - 🚀 **队列恢复**：服务器重启后自动恢复未完成任务
 - 📈 **统计面板**：详细的任务统计和历史记录
+- ⚙️ **配置管理**：YAML配置文件支持自定义yt-dlp路径、代理、输出目录等
+- 🎛️ **服务管理**：简单的start/stop/status命令管理服务器
 
 ## 🎯 核心特性
 
@@ -19,6 +21,9 @@
 - 🍺 **Homebrew 集成**：完整的服务管理支持
 - 📊 **实时监控**：随时查看下载状态和队列情况
 - 🗃️ **数据持久化**：SQLite3 数据库确保数据安全
+- ⚙️ **灵活配置**：YAML配置文件支持自定义各种参数
+- 🌐 **代理支持**：支持HTTP/SOCKS5代理配置
+- 🎛️ **服务管理**：start/stop/status命令轻松管理服务器
 
 ## 🚀 快速开始
 
@@ -96,6 +101,7 @@ brew services list | grep vdh
 | `start` | 在后台启动VDH服务器 | `vdh start` |
 | `stop` | 停止运行中的VDH服务器 | `vdh stop` |
 | `status` | 检查服务器和队列状态 | `vdh status` |
+| `config` | 管理配置文件 | `vdh config show` |
 | `server` | 启动Unix socket服务器(前台) | `vdh server` |
 | `input`, `-i` | 发送下载请求到服务器 | `vdh -i "URL"` |
 | `task` | 查询指定任务详情 | `vdh task abc123def456` |
@@ -152,6 +158,106 @@ brew services list | grep vdh
       file_path TEXT                   -- 下载文件路径
   );
   ```
+
+## ⚙️ 配置管理
+
+VDH v2.0.0 支持通过 YAML 配置文件自定义各种参数。
+
+### 配置文件位置
+
+- **文件路径**: `~/.vdh/config.yaml`
+- **格式**: YAML (Yet Another Markup Language)
+- **创建**: 首次运行时自动创建
+
+### 配置选项
+
+```yaml
+# yt-dlp 可执行文件路径
+yt_dlp_path: "/opt/homebrew/bin/yt-dlp"
+
+# 视频下载输出目录
+output_directory: "~/Downloads/VideoDownloader"
+
+# 代理设置 (可选)
+proxy_url: "http://127.0.0.1:7890"  # HTTP代理
+# proxy_url: "socks5://127.0.0.1:1080"  # SOCKS5代理
+
+# 最大并发下载数
+max_concurrent_downloads: 2
+
+# 任务清理保留天数
+cleanup_days: 30
+
+# 启用详细日志
+enable_logging: true
+
+# 临时文件目录
+temp_directory: "~/.vdh/temp"
+```
+
+### 配置管理命令
+
+| 命令 | 功能 | 示例 |
+|------|------|------|
+| `vdh config` | 显示当前配置 | `vdh config` |
+| `vdh config show` | 显示当前配置 | `vdh config show` |
+| `vdh config edit` | 打开配置文件编辑 | `vdh config edit` |
+| `vdh config reload` | 重新加载配置 | `vdh config reload` |
+| `vdh config reset` | 重置为默认配置 | `vdh config reset` |
+
+### 配置示例
+
+```bash
+# 查看当前配置
+vdh config show
+
+# 编辑配置文件
+vdh config edit
+
+# 手动编辑后重新加载
+vdh config reload
+
+# 重置所有设置
+vdh config reset
+```
+
+### 常用配置场景
+
+#### 1. 配置代理服务器
+```yaml
+# HTTP 代理
+proxy_url: "http://127.0.0.1:7890"
+
+# SOCKS5 代理
+proxy_url: "socks5://127.0.0.1:1080"
+
+# 企业代理
+proxy_url: "http://proxy.company.com:8080"
+```
+
+#### 2. 自定义输出目录
+```yaml
+# 默认位置
+output_directory: "~/Downloads/VideoDownloader"
+
+# 外部硬盘
+output_directory: "/Volumes/ExternalDrive/Videos"
+
+# 自定义路径
+output_directory: "~/Movies/Downloaded"
+```
+
+#### 3. 性能调优
+```yaml
+# 高性能设置 (多核CPU)
+max_concurrent_downloads: 4
+
+# 保守设置 (低配置设备)
+max_concurrent_downloads: 1
+
+# 快速清理 (节省空间)
+cleanup_days: 7
+```
 
 ## 📋 队列管理系统
 
@@ -382,11 +488,14 @@ vdh/
 └── README.md               # 本文档
 
 ~/.vdh/
-└── video_downloader.db     # SQLite3 数据库文件
+├── config.yaml             # 配置文件 (YAML格式)
+├── video_downloader.db     # SQLite3 数据库文件
+└── temp/                   # 临时文件目录
 ```
 
 ### 核心组件
 
+- **ConfigManager**: 配置文件管理类
 - **DatabaseManager**: SQLite3 数据库管理类
 - **VideoDownloaderHelper**: 主服务类，处理队列和下载
 - **TaskStatus**: 任务状态枚举 (6种状态)
