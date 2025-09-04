@@ -29,7 +29,16 @@
 
 ### 安装
 
-#### 方式 1: 使用 Makefile（推荐）
+#### 方式 1: 本地快速安装（推荐）
+```bash
+# 一键编译并安装到系统
+./install-local.sh
+
+# 或仅编译测试
+./install-local.sh --build-only
+```
+
+#### 方式 2: 使用 Makefile
 ```bash
 # 构建和安装
 make install
@@ -38,16 +47,47 @@ make install
 make service-status
 ```
 
-#### 方式 2: 使用安装脚本
+#### 方式 3: 完整安装脚本
 ```bash
+# 多种安装选项，包括 Homebrew 支持
 ./install.sh
 ```
 
-#### 方式 3: Homebrew（开发模式）
+#### 方式 4: Homebrew（开发模式）
 ```bash
 make homebrew-tap
 brew install local/vdh/vdh
 ```
+
+### 🔧 安装说明
+
+#### install-local.sh 特性
+- ✅ **自动检查依赖**：检查Swift编译器和源文件
+- 🔨 **优化编译**：使用 `-O` 参数进行性能优化
+- 📁 **目录管理**：自动创建 `~/.vdh` 配置目录
+- 🔐 **权限处理**：智能处理系统目录写入权限
+- 🔄 **版本备份**：安装前自动备份现有版本
+- ✅ **安装测试**：安装后自动验证功能
+
+#### 安装脚本选项
+```bash
+./install-local.sh          # 完整安装流程
+./install-local.sh --build-only    # 仅编译，不安装
+./install-local.sh --force         # 强制重新安装
+./install-local.sh --help          # 显示帮助
+```
+
+#### 系统要求
+- **操作系统**：macOS 10.15+ 
+- **编译器**：Swift 5.0+ (Xcode 或 Swift Toolchain)
+- **权限**：安装到 `/usr/local/bin` 需要管理员权限
+
+#### 安装路径
+- **可执行文件**：`/usr/local/bin/vdh`
+- **配置目录**：`~/.vdh/`
+- **配置文件**：`~/.vdh/config.yaml`
+- **数据库**：`~/.vdh/vdh.db`
+- **日志文件**：`~/.vdh/vdh.log`
 
 ### 基本使用
 
